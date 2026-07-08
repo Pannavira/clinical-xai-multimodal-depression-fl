@@ -1,0 +1,26 @@
+# federated_partition_config.yaml
+# Konfigurasi pembagian dataset untuk skenario Federated Learning
+# Tahap 3: Pemisahan Global Test Set dan Distribusi Client
+
+global_split:
+  test_size: 0.2
+  stratify_by: "depression_label"
+  random_state: 42
+  description: "Memisahkan 20% data secara terpusat sebagai Global Test Set yang belum pernah dilihat oleh semua client."
+
+federated_clients:
+  num_clients: 3
+  distribution_method: "iid" # Options: 'iid', 'non_iid'
+  non_iid_alpha: 0.5 # Dirchlet alpha jika menggunakan non-IID
+  random_state: 42
+  description: "Sisa 80% data akan didistribusikan ke num_clients. IID berarti distribusi label seimbang antar client."
+
+modalities:
+  - "text"
+  - "audio"
+  - "visual"
+
+data_paths:
+  input_dataset: "preprocessing_output/processed_multimodal_dataset.csv"
+  global_test_output: "preprocessing_output/global_test_dataset.csv"
+  client_train_output_prefix: "preprocessing_output/client_data/client_"
