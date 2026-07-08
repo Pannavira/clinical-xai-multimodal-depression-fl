@@ -1,4 +1,5 @@
 data
 preprocessing_output
+federated_learning_output
 .env
 .venv
