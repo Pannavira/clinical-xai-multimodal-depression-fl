@@ -1,0 +1,58 @@
+# Centralized Multimodal Depression Baseline Configuration
+project_name: FED-MIND
+experiment_stage: centralized_multimodal_baseline
+
+data:
+  workspace_dir: "."
+  train_index: "federated_learning_output/global_train_index.csv"
+  validation_index: "federated_learning_output/global_validation_index.csv"
+  test_index: "federated_learning_output/global_test_index.csv"
+  detailed_labels_path: "data/detailed_lables.csv"
+  preprocessing_output_dir: "preprocessing_output"
+  visual_features_csv: "preprocessing_output/visual/visual_features.csv"
+  visual_sequence_npy: "preprocessing_output/visual/visual_features_sequence.npy"
+  visual_sequence_index_csv: "preprocessing_output/visual/visual_features_sequence_index.csv"
+  output_dir: "modeling_output"
+
+columns:
+  id_column: "participant_id"
+  raw_label_column: "depression_label"
+  binary_label_column: "Depression_label"
+  text_feature_column: "text_feature_path"
+  audio_feature_column: "audio_feature_path"
+  visual_feature_column: "visual_feature_path"
+
+features:
+  text_dim: 768
+  audio_dim: 128
+  visual_dim: 178
+  visual_source: "tabular" # options: "tabular" (178-d from visual_features.csv) or "sequence_pooled" (31-d mean pooled from visual_features_sequence.npy)
+
+model:
+  text_encoder: "mlp"
+  audio_encoder: "mlp"
+  visual_encoder: "mlp"
+  fusion_strategy: "late_fusion" # options: "late_fusion", "text_only", "audio_only", "visual_only", "text_audio", "text_visual", "audio_visual"
+  hidden_dim: 128
+  fusion_dim: 128
+  dropout: 0.3
+
+training:
+  batch_size: 16
+  epochs: 50
+  learning_rate: 0.0005
+  optimizer: "adam"
+  weight_decay: 0.0001
+  loss_function: "binary_cross_entropy"
+  early_stopping: true
+  patience: 10
+  random_seed: 42
+
+evaluation:
+  metrics:
+    - accuracy
+    - precision
+    - recall
+    - f1_score
+    - auc_roc
+  threshold: 0.5
