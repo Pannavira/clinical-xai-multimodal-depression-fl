@@ -49,14 +49,19 @@ def run_error_analysis(config_path, strategy='late_fusion'):
     ckpt_path = os.path.join(ckpt_dir, f"{strategy}_baseline.pt")
     model = MultimodalDepressionClassifier(config=config).to(device)
 
+    threshold = config['evaluation']['threshold']
     if os.path.exists(ckpt_path):
-        model.load_state_dict(torch.load(ckpt_path, map_location=device))
+        ckpt = torch.load(ckpt_path, map_location=device)
+        if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
+            model.load_state_dict(ckpt['model_state_dict'])
+            threshold = ckpt.get('best_threshold', threshold)
+        else:
+            model.load_state_dict(ckpt)
     else:
-        model, _, _, _ = train_single_model(config, strategy=strategy, epochs=15, verbose=False)
+        model, _, test_m, _ = train_single_model(config, strategy=strategy, epochs=25, verbose=False)
+        threshold = test_m.get('threshold', threshold)
 
     model.eval()
-    threshold = config['evaluation']['threshold']
-
     records = []
 
     with torch.no_grad():

@@ -28,44 +28,36 @@ class MultimodalDepressionDataset(Dataset):
     - Label: Binary classification target (0 = non-depressed, 1 = depressed)
     """
 
-    def __init__(self, index_df, config, base_dir="."):
+    def __init__(self, index_df, config, base_dir=".", scaler_stats=None):
         """
         Args:
             index_df (pd.DataFrame): DataFrame containing participant split index.
             config (dict): Configuration dictionary loaded from centralized_baseline_config.yaml.
             base_dir (str): Base root directory of the workspace.
+            scaler_stats (dict, optional): Mean and Std dictionary for feature standardization.
         """
         self.config = config
         self.base_dir = base_dir
         self.df = index_df.copy().reset_index(drop=True)
+        self.scaler_stats = scaler_stats
         
         # Standardize participant_id to int
         self.df['participant_id'] = self.df['participant_id'].astype(int)
         
-        # Load binary labels from detailed_lables.csv if available
+        # Load binary labels safely via participant mapping dictionary
         labels_path = os.path.join(self.base_dir, config['data']['detailed_labels_path'])
         if os.path.exists(labels_path):
             df_labels = pd.read_csv(labels_path)
             df_labels['Participant'] = df_labels['Participant'].astype(int)
+            label_dict = df_labels.set_index('Participant')['Depression_label'].to_dict()
             
-            # Merge to get Depression_label
-            merged = pd.merge(
-                self.df,
-                df_labels[['Participant', 'Depression_label']],
-                left_on='participant_id',
-                right_on='Participant',
-                how='left'
-            )
-            
-            # Fallback if null
-            if merged['Depression_label'].isnull().any():
-                merged['binary_label'] = merged['Depression_label'].fillna(
-                    (merged['depression_label'] >= 10).astype(int)
+            mapped_labels = self.df['participant_id'].map(label_dict)
+            if mapped_labels.isnull().any():
+                self.df['binary_label'] = mapped_labels.fillna(
+                    (self.df['depression_label'] >= 10).astype(int)
                 ).astype(int)
             else:
-                merged['binary_label'] = merged['Depression_label'].astype(int)
-                
-            self.df['binary_label'] = merged['binary_label'].values
+                self.df['binary_label'] = mapped_labels.astype(int)
         else:
             # Fallback threshold >= 10
             self.df['binary_label'] = (self.df['depression_label'] >= 10).astype(int)
@@ -148,6 +140,15 @@ class MultimodalDepressionDataset(Dataset):
             vis_dim = self.config['features']['visual_dim']
             visual_feat = np.zeros(vis_dim, dtype=np.float32)
 
+        # Apply z-score normalization if scaler statistics are provided
+        if self.scaler_stats is not None:
+            if 'visual_mean' in self.scaler_stats and 'visual_std' in self.scaler_stats:
+                visual_feat = (visual_feat - self.scaler_stats['visual_mean']) / (self.scaler_stats['visual_std'] + 1e-8)
+            if 'audio_mean' in self.scaler_stats and 'audio_std' in self.scaler_stats:
+                audio_feat = (audio_feat - self.scaler_stats['audio_mean']) / (self.scaler_stats['audio_std'] + 1e-8)
+            if 'text_mean' in self.scaler_stats and 'text_std' in self.scaler_stats:
+                text_feat = (text_feat - self.scaler_stats['text_mean']) / (self.scaler_stats['text_std'] + 1e-8)
+
         return {
             'participant_id': torch.tensor(pid, dtype=torch.long),
             'text': torch.tensor(text_feat, dtype=torch.float32),
@@ -157,13 +158,46 @@ class MultimodalDepressionDataset(Dataset):
         }
 
 
-def get_multimodal_dataloaders(config_path_or_dict, base_dir="."):
+def compute_scaler_stats(train_dataset):
+    """Computes mean and std across the training dataset for feature scaling."""
+    all_visual, all_audio, all_text = [], [], []
+    for item in train_dataset:
+        all_visual.append(item['visual'].numpy())
+        all_audio.append(item['audio'].numpy())
+        all_text.append(item['text'].numpy())
+
+    all_visual = np.array(all_visual)
+    all_audio = np.array(all_audio)
+    all_text = np.array(all_text)
+
+    return {
+        'visual_mean': np.mean(all_visual, axis=0),
+        'visual_std': np.std(all_visual, axis=0),
+        'audio_mean': np.mean(all_audio, axis=0),
+        'audio_std': np.std(all_audio, axis=0),
+        'text_mean': np.mean(all_text, axis=0),
+        'text_std': np.std(all_text, axis=0),
+    }
+
+
+def get_pos_weight(train_dataset):
+    """Calculates class balance ratio pos_weight = num_negatives / num_positives for BCE loss."""
+    labels = [item['label'].item() for item in train_dataset]
+    n_pos = sum(1 for l in labels if l == 1.0)
+    n_neg = sum(1 for l in labels if l == 0.0)
+    if n_pos == 0:
+        return 1.0
+    return float(n_neg / n_pos)
+
+
+def get_multimodal_dataloaders(config_path_or_dict, base_dir=".", normalize=True):
     """
     Constructs PyTorch DataLoaders for Train, Validation, and Test splits.
     
     Args:
         config_path_or_dict: File path string or config dictionary.
         base_dir (str): Base root directory of the workspace.
+        normalize (bool): Whether to perform feature z-score normalization using training stats.
         
     Returns:
         tuple: (train_loader, val_loader, test_loader)
@@ -185,9 +219,15 @@ def get_multimodal_dataloaders(config_path_or_dict, base_dir="."):
     df_val = pd.read_csv(val_csv)
     df_test = pd.read_csv(test_csv)
 
-    train_dataset = MultimodalDepressionDataset(df_train, config, base_dir=base_dir)
-    val_dataset = MultimodalDepressionDataset(df_val, config, base_dir=base_dir)
-    test_dataset = MultimodalDepressionDataset(df_test, config, base_dir=base_dir)
+    raw_train_dataset = MultimodalDepressionDataset(df_train, config, base_dir=base_dir)
+    
+    scaler_stats = None
+    if normalize:
+        scaler_stats = compute_scaler_stats(raw_train_dataset)
+
+    train_dataset = MultimodalDepressionDataset(df_train, config, base_dir=base_dir, scaler_stats=scaler_stats)
+    val_dataset = MultimodalDepressionDataset(df_val, config, base_dir=base_dir, scaler_stats=scaler_stats)
+    test_dataset = MultimodalDepressionDataset(df_test, config, base_dir=base_dir, scaler_stats=scaler_stats)
 
     batch_size = config['training']['batch_size']
     num_workers = 0  # Safe default for Windows cross-process loader

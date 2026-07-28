@@ -51,14 +51,21 @@ def evaluate_all_baselines(config_path):
 
         model = MultimodalDepressionClassifier(config=strat_config).to(device)
 
+        eval_thresh = config['evaluation']['threshold']
         if os.path.exists(ckpt_path):
             print(f"Loading checkpoint for {strat:15s} from: {ckpt_path}")
-            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+            ckpt = torch.load(ckpt_path, map_location=device)
+            if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
+                model.load_state_dict(ckpt['model_state_dict'])
+                eval_thresh = ckpt.get('best_threshold', eval_thresh)
+            else:
+                model.load_state_dict(ckpt)
         else:
-            print(f"Checkpoint for {strat:15s} not found. Training model for 15 epochs...")
-            model, _, _, _ = train_single_model(strat_config, strategy=strat, epochs=15, verbose=False)
+            print(f"Checkpoint for {strat:15s} not found. Training model...")
+            model, _, test_m, _ = train_single_model(strat_config, strategy=strat, epochs=25, verbose=False)
+            eval_thresh = test_m.get('threshold', eval_thresh)
 
-        metrics, _, _ = evaluate(model, test_loader, criterion, device, threshold=config['evaluation']['threshold'])
+        metrics, _, _ = evaluate(model, test_loader, criterion, device, threshold=eval_thresh)
         
         row = {
             'model_name': strat,
@@ -68,10 +75,11 @@ def evaluate_all_baselines(config_path):
             'recall': metrics['recall'],
             'f1_score': metrics['f1_score'],
             'auc_roc': metrics['auc_roc'],
-            'test_loss': metrics['loss']
+            'test_loss': metrics['loss'],
+            'optimal_threshold': metrics.get('threshold', eval_thresh)
         }
         results.append(row)
-        print(f"Strategy: {strat:15s} | Acc: {metrics['accuracy']:.4f} | Prec: {metrics['precision']:.4f} | Rec: {metrics['recall']:.4f} | F1: {metrics['f1_score']:.4f} | AUC: {metrics['auc_roc']:.4f}")
+        print(f"Strategy: {strat:15s} | Acc: {metrics['accuracy']:.4f} | Prec: {metrics['precision']:.4f} | Rec: {metrics['recall']:.4f} | F1: {metrics['f1_score']:.4f} | AUC: {metrics['auc_roc']:.4f} (Thresh: {eval_thresh:.2f})")
 
     results_df = pd.DataFrame(results)
 

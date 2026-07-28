@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 # Ensure root workspace directory is in Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from modeling.dataset_loader import load_config, get_multimodal_dataloaders
+from modeling.dataset_loader import load_config, get_multimodal_dataloaders, get_pos_weight
 from modeling.models.multimodal_fusion import MultimodalDepressionClassifier
 
 
@@ -22,6 +22,19 @@ def set_seed(seed=42):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def find_best_threshold(y_true, y_probs):
+    """Finds optimal decision threshold on validation predictions that maximizes F1-Score."""
+    best_thresh = 0.5
+    best_f1 = -1.0
+    for thresh in np.arange(0.1, 0.9, 0.02):
+        y_pred = (np.array(y_probs) >= thresh).astype(int)
+        f1 = f1_score(y_true, y_pred, zero_division=0)
+        if f1 > best_f1:
+            best_f1 = f1
+            best_thresh = thresh
+    return float(best_thresh)
 
 
 def calculate_metrics(y_true, y_probs, threshold=0.5):
@@ -49,7 +62,8 @@ def calculate_metrics(y_true, y_probs, threshold=0.5):
         'precision': round(float(prec), 4),
         'recall': round(float(rec), 4),
         'f1_score': round(float(f1), 4),
-        'auc_roc': round(float(auc), 4)
+        'auc_roc': round(float(auc), 4),
+        'threshold': round(float(threshold), 4)
     }
 
 
@@ -113,8 +127,14 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
 
     train_loader, val_loader, test_loader = get_multimodal_dataloaders(config, base_dir=base_dir)
 
+    # Calculate pos_weight for class imbalance handling
+    pos_w_val = get_pos_weight(train_loader.dataset)
+    pos_weight = torch.tensor([pos_w_val], dtype=torch.float32).to(device)
+    if verbose:
+        print(f"Computed Class Balance pos_weight: {pos_w_val:.4f}")
+
     model = MultimodalDepressionClassifier(config=config).to(device)
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = Adam(
         model.parameters(),
         lr=config['training']['learning_rate'],
@@ -122,9 +142,10 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
     )
 
     max_epochs = config['training']['epochs']
-    patience = config['training'].get('patience', 10)
+    patience = config['training'].get('patience', 15)
     best_val_f1 = -1.0
     best_val_auc = -1.0
+    best_thresh = 0.5
     patience_counter = 0
 
     best_model_weights = copy.deepcopy(model.state_dict())
@@ -157,8 +178,10 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
 
         avg_train_loss = train_loss / len(train_loader.dataset)
 
-        # Evaluate on validation set
-        val_metrics, _, _ = evaluate(model, val_loader, criterion, device, threshold=config['evaluation']['threshold'])
+        # Evaluate on validation set using dynamic best threshold search
+        raw_val_metrics, val_targets, val_probs = evaluate(model, val_loader, criterion, device, threshold=0.5)
+        opt_thresh = find_best_threshold(val_targets, val_probs)
+        val_metrics, _, _ = evaluate(model, val_loader, criterion, device, threshold=opt_thresh)
 
         log_row = {
             'epoch': epoch,
@@ -168,23 +191,30 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
             'val_precision': val_metrics['precision'],
             'val_recall': val_metrics['recall'],
             'val_f1': val_metrics['f1_score'],
-            'val_auc': val_metrics['auc_roc']
+            'val_auc': val_metrics['auc_roc'],
+            'opt_threshold': opt_thresh
         }
         epoch_logs.append(log_row)
 
         if verbose:
-            print(f"Epoch {epoch:2d}/{max_epochs:2d} | Train Loss: {avg_train_loss:.4f} | Val Loss: {val_metrics['loss']:.4f} | Val F1: {val_metrics['f1_score']:.4f} | Val AUC: {val_metrics['auc_roc']:.4f}")
+            print(f"Epoch {epoch:2d}/{max_epochs:2d} | Train Loss: {avg_train_loss:.4f} | Val Loss: {val_metrics['loss']:.4f} | Val F1: {val_metrics['f1_score']:.4f} | Val Recall: {val_metrics['recall']:.4f} | Val AUC: {val_metrics['auc_roc']:.4f} (Thresh: {opt_thresh:.2f})")
 
         # Checkpoint criterion: Val F1 primary, Val AUC secondary
         if val_metrics['f1_score'] > best_val_f1 or (val_metrics['f1_score'] == best_val_f1 and val_metrics['auc_roc'] > best_val_auc):
             best_val_f1 = val_metrics['f1_score']
             best_val_auc = val_metrics['auc_roc']
+            best_thresh = opt_thresh
             best_model_weights = copy.deepcopy(model.state_dict())
             patience_counter = 0
             
             # Save checkpoint .pt
             ckpt_path = os.path.join(ckpt_dir, f"{strategy}_baseline.pt")
-            torch.save(model.state_dict(), ckpt_path)
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'best_threshold': best_thresh,
+                'val_f1': best_val_f1,
+                'val_auc': best_val_auc
+            }, ckpt_path)
         else:
             patience_counter += 1
             if patience_counter >= patience:
@@ -199,14 +229,14 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
 
     # Load best model weights for final evaluation
     model.load_state_dict(best_model_weights)
-    val_best_metrics, _, _ = evaluate(model, val_loader, criterion, device, threshold=config['evaluation']['threshold'])
-    test_metrics, _, _ = evaluate(model, test_loader, criterion, device, threshold=config['evaluation']['threshold'])
+    val_best_metrics, _, _ = evaluate(model, val_loader, criterion, device, threshold=best_thresh)
+    test_metrics, _, _ = evaluate(model, test_loader, criterion, device, threshold=best_thresh)
 
     if verbose:
         print("\n" + "-" * 60)
-        print(f" BEST CHECKPOINT RESULTS FOR {strategy.upper()}:")
-        print(f" Validation -> F1: {val_best_metrics['f1_score']:.4f} | AUC: {val_best_metrics['auc_roc']:.4f} | Acc: {val_best_metrics['accuracy']:.4f}")
-        print(f" Global Test -> F1: {test_metrics['f1_score']:.4f} | AUC: {test_metrics['auc_roc']:.4f} | Acc: {test_metrics['accuracy']:.4f} | Recall: {test_metrics['recall']:.4f}")
+        print(f" BEST CHECKPOINT RESULTS FOR {strategy.upper()} (Optimal Threshold: {best_thresh:.2f}):")
+        print(f" Validation -> F1: {val_best_metrics['f1_score']:.4f} | AUC: {val_best_metrics['auc_roc']:.4f} | Acc: {val_best_metrics['accuracy']:.4f} | Rec: {val_best_metrics['recall']:.4f}")
+        print(f" Global Test -> F1: {test_metrics['f1_score']:.4f} | AUC: {test_metrics['auc_roc']:.4f} | Acc: {test_metrics['accuracy']:.4f} | Rec: {test_metrics['recall']:.4f}")
         print("-" * 60 + "\n")
 
     return model, val_best_metrics, test_metrics, log_df

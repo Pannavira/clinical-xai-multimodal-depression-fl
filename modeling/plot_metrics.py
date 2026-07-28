@@ -58,15 +58,23 @@ def plot_all_metrics(config_path):
 
         model = MultimodalDepressionClassifier(config=strat_config).to(device)
 
+        eval_thresh = config['evaluation']['threshold']
         if os.path.exists(ckpt_path):
-            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+            ckpt = torch.load(ckpt_path, map_location=device)
+            if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
+                model.load_state_dict(ckpt['model_state_dict'])
+                eval_thresh = ckpt.get('best_threshold', eval_thresh)
+            else:
+                model.load_state_dict(ckpt)
         else:
-            model, _, _, _ = train_single_model(strat_config, strategy=strat, epochs=15, verbose=False)
+            model, _, test_m, _ = train_single_model(strat_config, strategy=strat, epochs=25, verbose=False)
+            eval_thresh = test_m.get('threshold', eval_thresh)
 
-        _, targets, probs = evaluate(model, test_loader, criterion, device, threshold=config['evaluation']['threshold'])
+        _, targets, probs = evaluate(model, test_loader, criterion, device, threshold=eval_thresh)
         model_data[strat] = {
             'targets': np.array(targets).astype(int),
-            'probs': np.array(probs)
+            'probs': np.array(probs),
+            'threshold': eval_thresh
         }
 
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
@@ -98,19 +106,19 @@ def plot_all_metrics(config_path):
     print("\n[1/3] Generating Confusion Matrices...")
     for strat in ['text_only', 'audio_only', 'visual_only', 'late_fusion']:
         data = model_data[strat]
-        preds = (data['probs'] >= config['evaluation']['threshold']).astype(int)
+        preds = (data['probs'] >= data['threshold']).astype(int)
         cm = confusion_matrix(data['targets'], preds)
 
         out_cm_path = os.path.join(cm_dir, f'cm_{strat}.png')
-        save_cm_plot(cm, f'Confusion Matrix - {strat.replace("_", " ").title()}', out_cm_path)
+        save_cm_plot(cm, f'Confusion Matrix - {strat.replace("_", " ").title()} (Thresh={data["threshold"]:.2f})', out_cm_path)
         print(f"  - Saved: {out_cm_path}")
 
     # Save primary confusion matrix png
     primary_cm = os.path.join(base_dir, config['data']['output_dir'], 'plots', 'confusion_matrix_baseline.png')
     data_mf = model_data['late_fusion']
-    preds_mf = (data_mf['probs'] >= config['evaluation']['threshold']).astype(int)
+    preds_mf = (data_mf['probs'] >= data_mf['threshold']).astype(int)
     cm_mf = confusion_matrix(data_mf['targets'], preds_mf)
-    save_cm_plot(cm_mf, 'Confusion Matrix - Full Multimodal Baseline', primary_cm)
+    save_cm_plot(cm_mf, f'Confusion Matrix - Full Multimodal Baseline (Thresh={data_mf["threshold"]:.2f})', primary_cm)
 
     # 2. Plot ROC Curves
     print("\n[2/3] Generating ROC Curves...")

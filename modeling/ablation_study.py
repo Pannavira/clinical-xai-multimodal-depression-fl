@@ -60,12 +60,19 @@ def run_ablation_study(config_path):
 
         model = MultimodalDepressionClassifier(config=strat_config).to(device)
 
+        eval_thresh = config['evaluation']['threshold']
         if os.path.exists(ckpt_path):
-            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+            ckpt = torch.load(ckpt_path, map_location=device)
+            if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
+                model.load_state_dict(ckpt['model_state_dict'])
+                eval_thresh = ckpt.get('best_threshold', eval_thresh)
+            else:
+                model.load_state_dict(ckpt)
         else:
-            model, _, _, _ = train_single_model(strat_config, strategy=strat, epochs=15, verbose=False)
+            model, _, test_m, _ = train_single_model(strat_config, strategy=strat, epochs=25, verbose=False)
+            eval_thresh = test_m.get('threshold', eval_thresh)
 
-        metrics, _, _ = evaluate(model, test_loader, criterion, device, threshold=config['evaluation']['threshold'])
+        metrics, _, _ = evaluate(model, test_loader, criterion, device, threshold=eval_thresh)
 
         if setup['name'] == 'Full Multimodal':
             baseline_f1 = metrics['f1_score']
