@@ -3,5 +3,6 @@ preprocessing_output
 federated_learning_output
 modeling_output
 modeling/__pycache__
+modeling/models/__pycache__
 .env
 .venv
