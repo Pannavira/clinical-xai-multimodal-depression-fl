@@ -51,12 +51,13 @@ def run_hyperparameter_tuning(config_path, strategy='late_fusion', max_trials=No
     print(f" HYPERPARAMETER TUNING UNTUK STRATEGI: {strategy.upper()}")
     print("=" * 70)
 
-    # Candidate hyperparameter grid
+    # Candidate hyperparameter grid targeting overfitting reduction
     param_grid = {
-        'learning_rate': [0.001, 0.0005, 0.0001],
+        'learning_rate': [0.0001, 0.0003, 0.0005],
         'batch_size': [16, 32],
-        'dropout': [0.2, 0.3, 0.5],
-        'hidden_dim': [64, 128, 256]
+        'dropout': [0.3, 0.4, 0.5],
+        'hidden_dim': [32, 64, 128],
+        'weight_decay': [0.0005, 0.001, 0.005]
     }
 
     keys, values = zip(*param_grid.items())
@@ -73,7 +74,7 @@ def run_hyperparameter_tuning(config_path, strategy='late_fusion', max_trials=No
 
     for i, params in enumerate(trials_to_run, start=1):
         exp_id = f"EXP{i:03d}"
-        print(f">>> Running Trial [{i}/{len(trials_to_run)}] {exp_id} | LR: {params['learning_rate']} | Batch: {params['batch_size']} | Dropout: {params['dropout']} | HiddenDim: {params['hidden_dim']}")
+        print(f">>> Running Trial [{i}/{len(trials_to_run)}] {exp_id} | LR: {params['learning_rate']} | Batch: {params['batch_size']} | Dropout: {params['dropout']} | HiddenDim: {params['hidden_dim']} | L2: {params['weight_decay']}")
 
         trial_config = load_config(os.path.join(base_dir, config_path) if not os.path.isabs(config_path) else config_path)
         trial_config['model']['hidden_dim'] = params['hidden_dim']
@@ -87,6 +88,7 @@ def run_hyperparameter_tuning(config_path, strategy='late_fusion', max_trials=No
                 epochs=epochs,
                 lr=params['learning_rate'],
                 batch_size=params['batch_size'],
+                weight_decay=params['weight_decay'],
                 verbose=False
             )
 
@@ -97,6 +99,7 @@ def run_hyperparameter_tuning(config_path, strategy='late_fusion', max_trials=No
                 'batch_size': params['batch_size'],
                 'dropout': params['dropout'],
                 'hidden_dim': params['hidden_dim'],
+                'weight_decay': params['weight_decay'],
                 'val_f1': val_m['f1_score'],
                 'val_auc': val_m['auc_roc'],
                 'val_accuracy': val_m['accuracy'],
@@ -115,6 +118,7 @@ def run_hyperparameter_tuning(config_path, strategy='late_fusion', max_trials=No
                 'batch_size': params['batch_size'],
                 'dropout': params['dropout'],
                 'hidden_dim': params['hidden_dim'],
+                'weight_decay': params['weight_decay'],
                 'val_f1': 0.0,
                 'val_auc': 0.0,
                 'val_accuracy': 0.0,

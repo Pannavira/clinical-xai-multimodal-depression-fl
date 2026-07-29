@@ -98,7 +98,7 @@ def evaluate(model, dataloader, criterion, device, threshold=0.5):
 
 
 def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None, lr=None, 
-                       batch_size=None, seed=None, verbose=True):
+                       batch_size=None, weight_decay=None, seed=None, verbose=True):
     """
     Train a single baseline model strategy (unimodal, bimodal, or late fusion).
     """
@@ -112,6 +112,8 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
         config['training']['learning_rate'] = lr
     if batch_size is not None:
         config['training']['batch_size'] = batch_size
+    if weight_decay is not None:
+        config['training']['weight_decay'] = weight_decay
     if seed is not None:
         config['training']['random_seed'] = seed
 
@@ -229,14 +231,19 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
 
     # Load best model weights for final evaluation
     model.load_state_dict(best_model_weights)
+    train_best_metrics, _, _ = evaluate(model, train_loader, criterion, device, threshold=best_thresh)
     val_best_metrics, _, _ = evaluate(model, val_loader, criterion, device, threshold=best_thresh)
     test_metrics, _, _ = evaluate(model, test_loader, criterion, device, threshold=best_thresh)
+
+    f1_gap = round(train_best_metrics['f1_score'] - test_metrics['f1_score'], 4)
 
     if verbose:
         print("\n" + "-" * 60)
         print(f" BEST CHECKPOINT RESULTS FOR {strategy.upper()} (Optimal Threshold: {best_thresh:.2f}):")
+        print(f" Train      -> F1: {train_best_metrics['f1_score']:.4f} | AUC: {train_best_metrics['auc_roc']:.4f} | Acc: {train_best_metrics['accuracy']:.4f} | Rec: {train_best_metrics['recall']:.4f}")
         print(f" Validation -> F1: {val_best_metrics['f1_score']:.4f} | AUC: {val_best_metrics['auc_roc']:.4f} | Acc: {val_best_metrics['accuracy']:.4f} | Rec: {val_best_metrics['recall']:.4f}")
         print(f" Global Test -> F1: {test_metrics['f1_score']:.4f} | AUC: {test_metrics['auc_roc']:.4f} | Acc: {test_metrics['accuracy']:.4f} | Rec: {test_metrics['recall']:.4f}")
+        print(f" F1-Score Gap (Train - Test): {f1_gap:.4f}")
         print("-" * 60 + "\n")
 
     return model, val_best_metrics, test_metrics, log_df

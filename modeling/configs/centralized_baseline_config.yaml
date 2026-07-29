@@ -35,17 +35,17 @@ model:
   fusion_strategy: "late_fusion" # options: "late_fusion", "text_only", "audio_only", "visual_only", "text_audio", "text_visual", "audio_visual"
   hidden_dim: 128
   fusion_dim: 128
-  dropout: 0.3
+  dropout: 0.5
 
 training:
   batch_size: 16
   epochs: 50
-  learning_rate: 0.0005
+  learning_rate: 0.0001
   optimizer: "adam"
-  weight_decay: 0.0001
+  weight_decay: 0.001
   loss_function: "binary_cross_entropy"
   early_stopping: true
-  patience: 10
+  patience: 7
   random_seed: 42
 
 evaluation:
