@@ -25,8 +25,8 @@ columns:
 features:
   text_dim: 768
   audio_dim: 128
-  visual_dim: 178
-  visual_source: "tabular" # options: "tabular" (178-d from visual_features.csv) or "sequence_pooled" (31-d mean pooled from visual_features_sequence.npy)
+  visual_dim: 31
+  visual_source: "sequence_pooled" # options: "tabular" (178-d from visual_features.csv) or "sequence_pooled" (31-d mean pooled from visual_features_sequence.npy)
 
 model:
   text_encoder: "mlp"
@@ -63,8 +63,9 @@ advanced_training:
   focal_alpha: 0.75             # Weight for positive class in FocalLoss (>0.5 boosts recall)
   focal_gamma: 2.0              # Focusing parameter (2.0 = standard)
 
-  # --- Data Augmentation (EXP037: noise=0.01) ---
+  # --- Data Augmentation (EXP037: noise=0.01 + ModalityDropout=0.15) ---
   augment_noise_std: 0.01       # Gaussian noise std-dev injected during training
+  modality_dropout_prob: 0.15   # Prob to zero-out a modality during training to prevent over-reliance
 
   # --- Learning Rate Scheduler (EXP037: LRSched=False) ---
   use_lr_scheduler: false       # ReduceLROnPlateau scheduler (off per EXP037)

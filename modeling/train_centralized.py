@@ -256,6 +256,7 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
     _use_lr_scheduler = use_lr_scheduler if use_lr_scheduler is not None else adv_cfg.get('use_lr_scheduler', False)
     _lr_scheduler_patience = adv_cfg.get('lr_scheduler_patience', 3)
     _lr_scheduler_factor = adv_cfg.get('lr_scheduler_factor', 0.5)
+    _modality_dropout_prob = adv_cfg.get('modality_dropout_prob', 0.0)
     _use_gated_fusion = use_gated_fusion if use_gated_fusion is not None else adv_cfg.get('use_gated_fusion', False)
     _threshold_strategy = threshold_strategy if threshold_strategy is not None else adv_cfg.get('threshold_strategy', 'f1')
     _min_precision = min_precision_constraint if min_precision_constraint is not None else adv_cfg.get('min_precision_constraint', 0.30)
@@ -266,7 +267,7 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
     if verbose:
         print("=" * 70)
         print(f" TRAINING STRATEGY: {strategy.upper()} (Device: {device})")
-        print(f" Focal Loss: {_use_focal_loss} | Noise Aug: {_augment_noise_std} | LR Scheduler: {_use_lr_scheduler}")
+        print(f" Focal Loss: {_use_focal_loss} | Noise Aug: {_augment_noise_std} | Modality Dropout: {_modality_dropout_prob}")
         print(f" Gated Fusion: {_use_gated_fusion} | Threshold Strategy: {_threshold_strategy}")
         print("=" * 70)
 
@@ -345,6 +346,16 @@ def train_single_model(config_path_or_dict, strategy='late_fusion', epochs=None,
                 batch['text'] = batch['text'] + torch.randn_like(batch['text']) * _augment_noise_std
                 batch['audio'] = batch['audio'] + torch.randn_like(batch['audio']) * _augment_noise_std
                 batch['visual'] = batch['visual'] + torch.randn_like(batch['visual']) * _augment_noise_std
+
+            # Modality Dropout (randomly zero-out individual modalities during training)
+            if _modality_dropout_prob > 0.0:
+                active_keys = [k for k in ['text', 'audio', 'visual'] if k in strategy or strategy == 'late_fusion']
+                if len(active_keys) > 1:
+                    for k in active_keys:
+                        if torch.rand(1).item() < _modality_dropout_prob:
+                            # Ensure not all modalities are dropped simultaneously
+                            if sum(1 for key in active_keys if torch.all(batch[key] == 0)) < len(active_keys) - 1:
+                                batch[k] = torch.zeros_like(batch[k])
 
             optimizer.zero_grad()
             logits = model(batch)
