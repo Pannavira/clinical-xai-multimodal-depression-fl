@@ -71,8 +71,8 @@ advanced_training:
   lr_scheduler_patience: 3      # Epochs to wait before reducing LR
   lr_scheduler_factor: 0.5      # LR multiplier on plateau
 
-  # --- Fusion Architecture (EXP037: GatedFusion=False) ---
-  use_gated_fusion: false       # Standard concat+MLP (better generalization per EXP037)
+  # --- Fusion Architecture (Gated Fusion Upgrade) ---
+  use_gated_fusion: true        # Dynamic per-modality GatedFusionHead
 
   # --- Threshold Strategy ---
   threshold_strategy: "recall_first"   # Maximize Recall s.t. Precision >= min_precision
