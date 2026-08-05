@@ -72,8 +72,9 @@ advanced_training:
   lr_scheduler_patience: 3      # Epochs to wait before reducing LR
   lr_scheduler_factor: 0.5      # LR multiplier on plateau
 
-  # --- Fusion Architecture (Gated Fusion Upgrade) ---
-  use_gated_fusion: true        # Dynamic per-modality GatedFusionHead
+  # --- Fusion Architecture (Cross-Modal Attention Upgrade) ---
+  fusion_architecture: "cross_attention" # Options: "concat", "gated", "cross_attention"
+  use_gated_fusion: false                 # Handled via fusion_architecture
 
   # --- Threshold Strategy ---
   threshold_strategy: "recall_first"   # Maximize Recall s.t. Precision >= min_precision

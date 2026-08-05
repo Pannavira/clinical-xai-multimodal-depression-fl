@@ -82,6 +82,59 @@ class GatedFusionHead(nn.Module):
         return self.classifier(gated)
 
 
+class CrossModalAttentionFusionHead(nn.Module):
+    """
+    Cross-Modal Multi-Head Attention Fusion Head.
+
+    Applies Multi-Head Attention across active modalities so that each modality
+    representation dynamically attends to and incorporates contextual cues from
+    other active modalities before final classification.
+    """
+
+    def __init__(self, num_modalities: int, hidden_dim: int, fusion_dim: int, dropout: float, num_heads: int = 4):
+        super(CrossModalAttentionFusionHead, self).__init__()
+        self.num_modalities = num_modalities
+        self.hidden_dim = hidden_dim
+
+        if num_modalities > 1:
+            self.cross_attn = nn.MultiheadAttention(
+                embed_dim=hidden_dim,
+                num_heads=num_heads,
+                dropout=dropout,
+                batch_first=True
+            )
+            self.norm = nn.LayerNorm(hidden_dim)
+        else:
+            self.cross_attn = None
+
+        concat_dim = hidden_dim * num_modalities
+        self.classifier = nn.Sequential(
+            nn.Linear(concat_dim, fusion_dim),
+            nn.LayerNorm(fusion_dim),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(fusion_dim, 1)
+        )
+
+    def forward(self, representations: list) -> torch.Tensor:
+        if len(representations) == 1 or self.cross_attn is None:
+            return self.classifier(representations[0])
+
+        # Stack: (B, num_modalities, hidden_dim)
+        stacked = torch.stack(representations, dim=1)
+
+        # Cross-Attention over modalities: (B, num_modalities, hidden_dim)
+        attn_out, _ = self.cross_attn(query=stacked, key=stacked, value=stacked)
+
+        # Residual Connection & Layer Normalization
+        fused = self.norm(stacked + attn_out)
+
+        # Flatten across modalities for classifier: (B, num_modalities * hidden_dim)
+        cat_fused = fused.reshape(fused.size(0), -1)
+
+        return self.classifier(cat_fused)
+
+
 class MultimodalDepressionClassifier(nn.Module):
     """
     PyTorch Multimodal Depression Classifier supporting 7 Baseline Strategies:
@@ -89,9 +142,10 @@ class MultimodalDepressionClassifier(nn.Module):
     - Bimodal: 'text_audio', 'text_visual', 'audio_visual'
     - Full Multimodal: 'late_fusion' (Text + Audio + Visual)
 
-    Supports two fusion head architectures:
-    - Standard: concatenate all representations → MLP → logit
-    - Gated (use_gated_fusion=True): learn adaptive per-modality gate weights → weighted sum → MLP → logit
+    Supports three fusion head architectures:
+    - Concat ('concat'): concatenate all representations → MLP → logit
+    - Gated ('gated'): learn adaptive per-modality gate weights → weighted sum → MLP → logit
+    - Cross-Attention ('cross_attention'): multi-head cross-attention across modalities → residual norm → MLP → logit
     """
 
     VALID_STRATEGIES = [
@@ -100,7 +154,7 @@ class MultimodalDepressionClassifier(nn.Module):
         'late_fusion'
     ]
 
-    def __init__(self, config=None, use_gated_fusion=None, **kwargs):
+    def __init__(self, config=None, use_gated_fusion=None, fusion_architecture=None, **kwargs):
         super(MultimodalDepressionClassifier, self).__init__()
 
         # Parse parameters from config dictionary or kwargs
@@ -118,9 +172,13 @@ class MultimodalDepressionClassifier(nn.Module):
             dropout = model_cfg.get('dropout', 0.3)
             fusion_strategy = model_cfg.get('fusion_strategy', 'late_fusion')
 
-            # use_gated_fusion: explicit argument overrides config
-            if use_gated_fusion is None:
-                use_gated_fusion = adv_cfg.get('use_gated_fusion', False)
+            if fusion_architecture is None:
+                fusion_architecture = adv_cfg.get('fusion_architecture', None)
+                if fusion_architecture is None:
+                    _gated = adv_cfg.get('use_gated_fusion', False)
+                    fusion_architecture = 'gated' if _gated else 'concat'
+            if use_gated_fusion is not None and use_gated_fusion:
+                fusion_architecture = 'gated'
         else:
             text_dim = kwargs.get('text_dim', 768)
             audio_dim = kwargs.get('audio_dim', 128)
@@ -129,15 +187,16 @@ class MultimodalDepressionClassifier(nn.Module):
             fusion_dim = kwargs.get('fusion_dim', 128)
             dropout = kwargs.get('dropout', 0.3)
             fusion_strategy = kwargs.get('fusion_strategy', 'late_fusion')
-            if use_gated_fusion is None:
-                use_gated_fusion = kwargs.get('use_gated_fusion', False)
+            if fusion_architecture is None:
+                fusion_architecture = kwargs.get('fusion_architecture', 'concat')
 
         if fusion_strategy not in self.VALID_STRATEGIES:
             raise ValueError(f"Invalid fusion_strategy '{fusion_strategy}'. Must be one of {self.VALID_STRATEGIES}")
 
         self.fusion_strategy = fusion_strategy
         self.hidden_dim = hidden_dim
-        self.use_gated_fusion = use_gated_fusion
+        self.fusion_architecture = fusion_architecture
+        self.use_gated_fusion = (fusion_architecture == 'gated')
 
         # Instantiate modal encoders conditionally
         self.text_encoder = None
@@ -161,16 +220,24 @@ class MultimodalDepressionClassifier(nn.Module):
         concat_dim = hidden_dim * active_modalities_count
 
         # Build fusion head based on architecture choice
-        if use_gated_fusion:
+        if self.fusion_architecture == 'gated':
             self.fusion_head = GatedFusionHead(
                 num_modalities=active_modalities_count,
                 hidden_dim=hidden_dim,
                 fusion_dim=fusion_dim,
                 dropout=dropout
             )
-            self.classifier = None  # Not used when gated fusion is active
+            self.classifier = None
+        elif self.fusion_architecture == 'cross_attention':
+            self.fusion_head = CrossModalAttentionFusionHead(
+                num_modalities=active_modalities_count,
+                hidden_dim=hidden_dim,
+                fusion_dim=fusion_dim,
+                dropout=dropout
+            )
+            self.classifier = None
         else:
-            # Standard concatenation + MLP (original baseline architecture)
+            # Standard concatenation + MLP
             self.fusion_head = None
             self.classifier = nn.Sequential(
                 nn.Linear(concat_dim, fusion_dim),
@@ -220,8 +287,8 @@ class MultimodalDepressionClassifier(nn.Module):
                 raise ValueError(f"Strategy '{self.fusion_strategy}' requires 'visual' tensor input.")
             representations.append(self.visual_encoder(visual_tensor))
 
-        if self.use_gated_fusion and self.fusion_head is not None:
-            # GatedFusionHead handles list of representations directly
+        if self.fusion_head is not None:
+            # GatedFusionHead or CrossModalAttentionFusionHead handles list of representations directly
             logits = self.fusion_head(representations)
         else:
             # Standard: concatenate latent representations along feature dimension

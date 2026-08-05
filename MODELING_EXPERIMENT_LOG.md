@@ -12,7 +12,7 @@ This document tracks the complete development lifecycle, architectural iteration
 | **Stage 4.1: Hyperparameter Optimization** | `feature/model-optimization` | `6a0b4e9` | Focal Loss ($\alpha=0.75, \gamma=2.0$), $L_2=0.003$, Noise Aug ($0.01$), `recall_first` Threshold | Text-Only Accuracy: **70.9%**, PR-AUC: **0.551** |
 | **Stage 4.2: Gated Fusion Upgrade** | `feature/gated-fusion-upgrade` | `230cbff` | `GatedFusionHead` (Adaptive per-modality scalar gating weights) | Late Fusion Depressed Recall: **69.2%** (9/13 detected) |
 | **Stage 4.3: Sequence Visuals + ModalDrop** | `feature/sequence-visual-modaldrop` | `601a5cc` | 31-d `sequence_pooled` visual features + Modality Dropout ($p=0.15$) | **New Record ROC-AUC: 0.7106** (`Text+Audio`) |
-| **Stage 4.4: Cross-Modal Attention** | `feature/cross-modal-attention` | *(Pending)* | Cross-Attention Transformer Fusion | *(Next Experiment)* |
+| **Stage 4.4: Cross-Modal Attention** | `feature/cross-modal-attention` | *(Active)* | `CrossModalAttentionFusionHead` (Multi-Head Cross Attention across modalities) | **New Record Depressed Recall: 76.9%** (10/13), **Highest Tri-Modal F1: 0.4444** |
 
 ---
 
@@ -24,8 +24,9 @@ This document tracks the complete development lifecycle, architectural iteration
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Initial Concat (`main`)** | 0.50 | 50.9% | 27.8% | 38.5% | 5 / 13 | 0.3226 | 0.6120 | 0.3520 |
 | **EXP037 Concat (`model-optimization`)** | 0.48 | **63.6%** | **33.3%** | 53.8% | 7 / 13 | 0.4118 | 0.6703 | **0.4070** |
-| **Gated Fusion (`gated-fusion-upgrade`)** | 0.46 | 54.5% | 30.0% | **69.2%** | **9 / 13** | **0.4186** | 0.6520 | 0.3650 |
+| **Gated Fusion (`gated-fusion-upgrade`)** | 0.46 | 54.5% | 30.0% | 69.2% | 9 / 13 | 0.4186 | 0.6520 | 0.3650 |
 | **Seq Visual + ModalDrop (`sequence-visual-modaldrop`)** | 0.28 | 61.8% | 33.3% | 53.8% | 7 / 13 | 0.4000 | **0.6960** | 0.3650 |
+| **Cross-Modal Attention (`cross-modal-attention`)** ⭐ | 0.42 | 54.5% | 31.3% | **76.9%** | **10 / 13** | **0.4444** | 0.6484 | 0.3650 |
 
 ---
 
