@@ -6,3 +6,4 @@ modeling/__pycache__
 modeling/models/__pycache__
 .env
 .venv
+temp
