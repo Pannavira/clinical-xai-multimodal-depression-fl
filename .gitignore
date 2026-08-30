@@ -7,3 +7,12 @@ modeling/models/__pycache__
 .env
 .venv
 temp
+modeling/01_Input_From_Partition
+modeling
+modeling2/__pycache__
+modeling2/tuning_output
+modeling2/output
+modeling3
+modeling4
+modeling5
+output/output02_Moderate_Regularization_Drop04

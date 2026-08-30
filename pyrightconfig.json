@@ -1,0 +1,7 @@
+{
+  "extraPaths": [
+    "modeling/08_Scripts"
+  ],
+  "venvPath": ".",
+  "venv": ".venv"
+}
